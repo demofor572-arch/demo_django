@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: davomat-django
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt && python manage.py migrate && python manage.py ensure_super && python manage.py load_sheet_data && python manage.py set_webhook && python manage.py collectstatic --noinput
+    startCommand: gunicorn config.wsgi:application
+    envVars:
+      - key: SECRET_KEY
+        sync: false
+      - key: DEBUG
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      # Botning YAGONA majburiy sozlamasi. Kodda saqlanmaydi: token
+      # bot ustidan to'liq nazorat beradi — u bilan begona odam
+      # o'quvchilarga markaz nomidan xabar yuborishi mumkin.
+      # Qolganlari (PUBLIC_BASE_URL, TG_WEBHOOK_SECRET, TG_BOT_USERNAME)
+      # settings.py da standart qiymatga ega — kerak bo'lsagina qo'shiladi.
+      - key: TG_BOT_TOKEN
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: EXCELLENCE_PASSWORD
+        sync: false
+      # Supermenejer — Render'ning bepul planida Shell yo'q, shuning
+      # uchun `ensure_super` build paytida shu raqamni supermenejer
+      # qilib qo'yadi. PAROL faqat menejer hali yaratilmagan bo'lsa
+      # kerak; yaratilgach o'sha env'ni o'chirib tashlash mumkin.
+      - key: SUPER_MANAGER_PHONE
+        sync: false
+      - key: SUPER_MANAGER_PASSWORD
+        sync: false
