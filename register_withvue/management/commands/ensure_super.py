@@ -28,6 +28,9 @@ from django.core.management.base import BaseCommand
 
 from register_withvue.models import Manager
 
+DEFAULT_SUPER_MANAGER_PHONE = "900562345"
+DEFAULT_SUPER_MANAGER_PASSWORD = "SuperManager123!"
+
 
 def _key(phone):
     return "".join(ch for ch in str(phone or "") if ch.isdigit())[-9:]
@@ -45,10 +48,12 @@ class Command(BaseCommand):
             )
 
     def _run(self):
-        phone = (os.environ.get("SUPER_MANAGER_PHONE") or "").strip()
+        phone = (
+            os.environ.get("SUPER_MANAGER_PHONE")
+            or DEFAULT_SUPER_MANAGER_PHONE
+        ).strip()
         if not phone:
-            self.stdout.write("SUPER_MANAGER_PHONE berilmagan — o'tkazib yuborildi")
-            return
+            phone = DEFAULT_SUPER_MANAGER_PHONE
 
         target = _key(phone)
         if len(target) < 7:
@@ -78,16 +83,16 @@ class Command(BaseCommand):
             )
             return
 
-        # Bazada bunday menejer yo'q — parol berilgan bo'lsa yaratamiz
-        password = os.environ.get("SUPER_MANAGER_PASSWORD") or ""
+        # Bazada bunday menejer yo'q — parol berilgan bo'lsa yaratamiz.
+        # Agar Render'da env yozilmagan bo'lsa, demo uchun ma'lum fallback
+        # qiymat ishlatiladi; keyinchalik Render Environment'da aniq parolni
+        # o'rnatish tavsiya etiladi.
+        password = (
+            os.environ.get("SUPER_MANAGER_PASSWORD")
+            or DEFAULT_SUPER_MANAGER_PASSWORD
+        ).strip()
         if not password:
-            self.stderr.write(
-                self.style.WARNING(
-                    f"{phone} — bunday menejer yo'q va SUPER_MANAGER_PASSWORD "
-                    "berilmagan, shuning uchun yaratilmadi"
-                )
-            )
-            return
+            password = DEFAULT_SUPER_MANAGER_PASSWORD
 
         manager = Manager.objects.create(
             name=(os.environ.get("SUPER_MANAGER_NAME") or "Super").strip(),
