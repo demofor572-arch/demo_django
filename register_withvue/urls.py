@@ -16,6 +16,8 @@ urlpatterns = [
     # ───────────────────────────────
     path("manager/register/", views.manager_register),
     path("manager/login/", views.manager_login),
+    path("excellence/login/", views.excellence_login),
+    path("excellence/", views.excellence_info),
     path("managers/", views.get_managers),
     path("manager/<int:manager_id>/update/", views.update_manager),
     path("manager/<int:manager_id>/delete/", views.delete_manager),

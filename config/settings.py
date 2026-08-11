@@ -145,12 +145,21 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 # CORS
+FRONTEND_BASE_URL = os.environ.get(
+    "FRONTEND_BASE_URL", "https://demo-bay-eta-38.vercel.app"
+).rstrip("/")
+
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:8080",
+    "https://demo-bay-eta-38.vercel.app",
 ]
 
-# test uchun
+# Vercel uchun umumiy subdomain moslama. Agar frontend boshqa Vercel
+# loyihaga o'tsa, bu ham ishlaydi.
+CORS_ALLOWED_ORIGIN_REGEXES = [r"^https://.*\.vercel\.app$"]
+
+# test uchun va frontend URL'larini brauzerda sinov qilish uchun
 CORS_ALLOW_ALL_ORIGINS = True
 
 # Menejer paneli destruktiv amallarda 'X-User-Phone' sarlavhasini,

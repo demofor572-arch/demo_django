@@ -636,6 +636,23 @@ def manager_login(request):
         return JsonResponse({"error": str(e)}, status=400)
 
 
+@csrf_exempt
+def excellence_login(request):
+    """Excellence frontend uchun manager login alias."""
+    return manager_login(request)
+
+
+def excellence_info(request):
+    """Simple health/info endpoint for the excellence frontend."""
+    return JsonResponse(
+        {
+            "ok": True,
+            "message": "Excellence backend yoqilgan",
+            "api": "/api/excellence/login/",
+        }
+    )
+
+
 def get_managers(request):
     """Menejerlar ro'yxati. ?all=1 — o'chirilganlari (is_active=False) ham."""
     try:
