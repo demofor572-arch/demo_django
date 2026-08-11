@@ -5,7 +5,7 @@ services:
     plan: free
     region: oregon
     buildCommand: pip install -r requirements.txt && python manage.py migrate && python manage.py ensure_super && python manage.py load_sheet_data && python manage.py set_webhook && python manage.py collectstatic --noinput
-    startCommand: gunicorn config.wsgi:application
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
     envVars:
       - key: SECRET_KEY
         sync: false
