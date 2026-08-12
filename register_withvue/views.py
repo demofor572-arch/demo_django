@@ -570,6 +570,7 @@ def manager_register(request):
 
 
 @csrf_exempt
+@csrf_exempt
 def manager_login(request):
     """Menejer login."""
     if request.method != "POST":
@@ -1016,18 +1017,10 @@ def create_teacher(request):
         if not name:
             return JsonResponse({"error": "Ism kiritilishi shart"}, status=400)
 
-        raw_password = (data.get("password") or "").strip()
         teacher = Teacher.objects.create(
             name=name,
             phone=phone,
-            # Parol berilmasa bo'sh qoldiriladi — login_student() bunday
-            # holatda ism-familiya bo'yicha kirishga ruxsat beradi (xuddi
-            # importdan kelgan studentlar kabi). Avval bu yerga
-            # ADMIN_PASSWORD qattiq yozilardi, lekin frontendning
-            # "ustoz qo'shish" formasida parol maydoni yo'q — shu sabab
-            # yangi qo'shilgan ustozlar hech qachon ADMIN_PASSWORD bilan
-            # kirishga urinmasdi va "login qila olmayapman" xatosi kelardi.
-            password=make_password(raw_password) if raw_password else "",
+            password=make_password(ADMIN_PASSWORD),
             is_senior=data.get("is_senior", False),
         )
         log_action(
@@ -2027,10 +2020,11 @@ def _name_password_matches(student, password):
     if not typed:
         return False
 
-    # Teacher modelida 'surname' maydoni yo'q — shu sabab getattr bilan
-    # ehtiyotkorlik qilinadi (ism yolg'iz ham yetadi)
-    full_name = f"{student.name} {getattr(student, 'surname', '')}".strip()
-    tokens = [t for t in (_fold_name(p) for p in full_name.split()) if t]
+    tokens = [
+        t
+        for t in (_fold_name(p) for p in f"{student.name} {student.surname}".split())
+        if t
+    ]
     if not tokens:
         return False
 
@@ -2237,15 +2231,7 @@ def login_student(request):
             )
 
         teacher = _find_teacher_by_any_phone(phone)
-        teacher_password_ok = False
-        if teacher:
-            if teacher.password and check_password(password, teacher.password):
-                teacher_password_ok = True
-            # Yangi qo'shilgan ustozga hali parol o'rnatilmagan bo'lsa —
-            # studentlardagi kabi ism-familiya orqali kirishga ruxsat
-            elif not teacher.password and _name_password_matches(teacher, password):
-                teacher_password_ok = True
-        if teacher and teacher_password_ok:
+        if teacher and teacher.password and check_password(password, teacher.password):
             if is_device_blocked(request, teacher.phone):
                 return JsonResponse(
                     {"error": "Bu qurilma bloklangan — menejerga murojaat qiling"},
@@ -2262,6 +2248,7 @@ def login_student(request):
                     "exists": True,
                     "id": teacher.id,
                     "name": teacher.name,
+                    "surname": "",
                     "phone": teacher.phone,
                     "teacher_id": teacher.id,
                     "is_admin": False,
