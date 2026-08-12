@@ -109,7 +109,7 @@ class Command(BaseCommand):
                 self.style.WARNING(
                     "PUBLIC_BASE_URL berilmagan — webhook o'rnatilmadi. "
                     "Render → Environment'da uni backend manziliga tenglang, "
-                    "masalan: https://itline-django-9s85.onrender.com"
+                    "masalan: https://demo-django-c3eh.onrender.com"
                 )
             )
             return

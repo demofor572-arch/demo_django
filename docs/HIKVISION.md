@@ -99,7 +99,7 @@ Panel → **Yuz tanish** → «Terminal qo'shish» → nomini yozing
 (masalan «Kirish eshigi») → saqlang. Kartochkada manzil chiqadi:
 
 ```
-https://itline-django-9s85.onrender.com/api/faceid/event/KALIT/
+https://demo-django-c3eh.onrender.com/api/faceid/event/KALIT/
 ```
 
 Bu manzil har bir terminal uchun alohida va maxfiy — uni faqat
@@ -114,7 +114,7 @@ bo'lishi ham mumkin):
 
 | Maydon        | Qiymat                                     |
 | ------------- | ------------------------------------------ |
-| IP / Domain   | `itline-django-9s85.onrender.com`          |
+| IP / Domain   | `demo-django-c3eh.onrender.com`          |
 | Port          | `443`                                      |
 | URL           | `/api/faceid/event/KALIT/`                 |
 | Protocol      | `HTTPS`                                    |

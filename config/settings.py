@@ -187,7 +187,7 @@ TG_BOT_USERNAME = os.environ.get("TG_BOT_USERNAME", "itline_test_2026bot")
 # standart qiymat shu yerda turadi va env o'zgaruvchisi shart emas.
 # Boshqa domenga ko'chsangiz PUBLIC_BASE_URL orqali almashtirasiz.
 PUBLIC_BASE_URL = os.environ.get(
-    "PUBLIC_BASE_URL", "https://itline-django-9s85.onrender.com"
+    "PUBLIC_BASE_URL", "https://demo-django-c3eh.onrender.com"
 ).rstrip("/")
 
 # Webhook maxfiy kaliti. Telegram har bir so'rovda buni
