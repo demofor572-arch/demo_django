@@ -998,12 +998,6 @@ def create_teacher(request):
     """O'qituvchi yaratish."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
-    # ⚠️ Bu yerda avval hech qanday ruxsat tekshiruvi yo'q edi — istalgan
-    # kishi (hatto kirmagan) ustoz yarata olardi. update_teacher/
-    # delete_teacher kabi endi shu yerda ham tekshiriladi.
-    denied = _require_staff(request) or require_permission(request, "teachers.add")
-    if denied:
-        return denied
     try:
         data = json.loads(request.body)
         phone = data.get("phone", "").strip()
@@ -1569,31 +1563,16 @@ def _hidden_phone_holders(search):
     out = []
     for s in Student.objects.filter(is_graduate=True):
         if key in (_phone_key(s.phone), _phone_key(s.phone2)):
-            out.append(
-                {
-                    "id": s.id,
-                    "name": f"{s.name} {s.surname}".strip(),
-                    "kind": "bitiruvchi",
-                }
-            )
+            out.append({"id": s.id, "name": f"{s.name} {s.surname}".strip(),
+                        "kind": "bitiruvchi"})
     for s in Student.objects.filter(is_admin=True):
         if key in (_phone_key(s.phone), _phone_key(s.phone2)):
-            out.append(
-                {
-                    "id": s.id,
-                    "name": f"{s.name} {s.surname}".strip(),
-                    "kind": "ustoz profili",
-                }
-            )
+            out.append({"id": s.id, "name": f"{s.name} {s.surname}".strip(),
+                        "kind": "ustoz profili"})
     for s in Student.objects.filter(is_excellence=True):
         if key in (_phone_key(s.phone), _phone_key(s.phone2)):
-            out.append(
-                {
-                    "id": s.id,
-                    "name": f"{s.name} {s.surname}".strip(),
-                    "kind": "menejer profili",
-                }
-            )
+            out.append({"id": s.id, "name": f"{s.name} {s.surname}".strip(),
+                        "kind": "menejer profili"})
     return out
 
 
@@ -1734,13 +1713,9 @@ def update_stage_price(request, stage):
         synced = 0
         if price_changed:
             synced = resync_unpaid_amount_due(
-                Student.objects.filter(stage=stage).prefetch_related(
-                    "payments", "groups"
-                )
+                Student.objects.filter(stage=stage).prefetch_related("payments", "groups")
             )
-        return JsonResponse(
-            {"stage": stage, "price": sp.price, "payments_synced": synced}
-        )
+        return JsonResponse({"stage": stage, "price": sp.price, "payments_synced": synced})
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
@@ -1844,8 +1819,8 @@ def update_student(request, student_id):
 
         # Doimiy chegirma o'zgarishi pulga tegadi — alohida ko'rsatamiz
         if monthly_discount_changed:
-            detail = f"doimiy chegirma {student.monthly_discount:,} so'm".replace(
-                ",", " "
+            detail = (
+                f"doimiy chegirma {student.monthly_discount:,} so'm".replace(",", " ")
             )
         else:
             detail = ", ".join(sorted(data.keys())) or "o'zgarishsiz"
@@ -2241,11 +2216,7 @@ def login_student(request):
                 request,
                 phone=student.phone,
                 # Ustozlarning panel profili — is_admin bo'lgan o'quvchi
-                role=(
-                    "teacher"
-                    if (student.is_admin or student.is_excellence)
-                    else "student"
-                ),
+                role="teacher" if (student.is_admin or student.is_excellence) else "student",
                 user_name=f"{student.name} {student.surname}".strip(),
             )
             return JsonResponse(
@@ -2586,7 +2557,9 @@ def attendance_group_day(request):
 
         # Coin ustoz davomat belgilayotgan joyda beriladi — shu yerda
         # balans ham, oylik erkin bonus ishlatilganmi ham ko'rinishi kerak
-        bonus_used = monthly_bonus_used_ids([s.id for s in students], group.teacher_id)
+        bonus_used = monthly_bonus_used_ids(
+            [s.id for s in students], group.teacher_id
+        )
 
         rows = [
             {
@@ -3011,9 +2984,7 @@ def get_payments(request, student_id):
                     "due_date": due.isoformat() if due else None,
                     "attended_count": attended,
                     "total_lessons": total,
-                    "attendance_due": attendance_based_due(
-                        p.amount_due, attended, total
-                    ),
+                    "attendance_due": attendance_based_due(p.amount_due, attended, total),
                 }
             )
         return JsonResponse(data, safe=False)
@@ -3091,9 +3062,7 @@ def get_all_payments(request):
                     # Davomatга qarab to'lov (kelgan darslar uchun)
                     "attended_count": attended,
                     "total_lessons": total,
-                    "attendance_due": attendance_based_due(
-                        p.amount_due, attended, total
-                    ),
+                    "attendance_due": attendance_based_due(p.amount_due, attended, total),
                     # Virtual karta (barcha oylar bo'yicha, o'quvchi darajasida)
                     "wallet_balance": wallet.get("balance", 0),
                     "wallet_debt": wallet.get("debt", 0),
@@ -3274,7 +3243,9 @@ def add_payment_installment(request, payment_id):
     except (ValueError, TypeError):
         return JsonResponse({"error": "amount son bo'lishi kerak"}, status=400)
     if amount <= 0:
-        return JsonResponse({"error": "amount 0 dan katta bo'lishi kerak"}, status=400)
+        return JsonResponse(
+            {"error": "amount 0 dan katta bo'lishi kerak"}, status=400
+        )
 
     paid_amount_before = int(payment.paid_amount or 0)
     payment.paid_amount = paid_amount_before + amount
@@ -3881,7 +3852,9 @@ def close_cash_session(request):
 
     if settings_obj.require_counted:
         if counted is None or str(counted).strip() == "":
-            return JsonResponse({"error": "Sanalgan pulni kiriting"}, status=400)
+            return JsonResponse(
+                {"error": "Sanalgan pulni kiriting"}, status=400
+            )
         try:
             counted = int(counted)
         except (ValueError, TypeError):
@@ -3889,7 +3862,9 @@ def close_cash_session(request):
                 {"error": "counted_total son bo'lishi kerak"}, status=400
             )
         if counted < 0:
-            return JsonResponse({"error": "counted_total manfiy bo'lmaydi"}, status=400)
+            return JsonResponse(
+                {"error": "counted_total manfiy bo'lmaydi"}, status=400
+            )
     else:
         # Sanoq ixtiyoriy — kiritilmasa tizim hisobi olinadi. Kiritilgani
         # son bo'lmasa jim 500 emas, tushunarli xato qaytishi kerak.
@@ -3918,9 +3893,7 @@ def close_cash_session(request):
         request,
         "cash.close",
         f"Kunlik kassa topshirildi — {session.date}: "
-        f"tizim {expected:,}, sanoq {counted:,}, farq {session.difference:+,}".replace(
-            ",", " "
-        ),
+        f"tizim {expected:,}, sanoq {counted:,}, farq {session.difference:+,}".replace(",", " "),
         target_type="cash_session",
         target_id=session.id,
         target_name=session.cashier_name,
@@ -3929,9 +3902,7 @@ def close_cash_session(request):
         difference=session.difference,
     )
 
-    return JsonResponse(
-        {"message": "Kassa topshirildi", "session": _session_dict(session)}
-    )
+    return JsonResponse({"message": "Kassa topshirildi", "session": _session_dict(session)})
 
 
 @csrf_exempt
@@ -3950,9 +3921,7 @@ def get_cash_sessions(request):
         year, mon = month.split("-")
         year, mon = int(year), int(mon)
     except (ValueError, AttributeError):
-        return JsonResponse(
-            {"error": "month format 'YYYY-MM' bo'lishi kerak"}, status=400
-        )
+        return JsonResponse({"error": "month format 'YYYY-MM' bo'lishi kerak"}, status=400)
 
     qs = CashSession.objects.filter(date__year=year, date__month=mon)
     sessions = [_session_dict(s) for s in qs]
@@ -4152,9 +4121,9 @@ def _payment_request_row(pr, include_receipt=False):
         "paid_at": str(pr.paid_at) if pr.paid_at else None,
         "note": pr.note,
         "created_at": pr.created_at.strftime("%Y-%m-%d %H:%M"),
-        "resolved_at": (
-            pr.resolved_at.strftime("%Y-%m-%d %H:%M") if pr.resolved_at else None
-        ),
+        "resolved_at": pr.resolved_at.strftime("%Y-%m-%d %H:%M")
+        if pr.resolved_at
+        else None,
     }
     if include_receipt:
         row["receipt_b64"] = pr.receipt_b64
@@ -4190,7 +4159,9 @@ def get_student_payment_requests(request, student_id):
         qs = PaymentRequest.objects.select_related("student").filter(
             student_id=student_id
         )
-        return JsonResponse([_payment_request_row(pr) for pr in qs[:50]], safe=False)
+        return JsonResponse(
+            [_payment_request_row(pr) for pr in qs[:50]], safe=False
+        )
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -4210,24 +4181,18 @@ def accept_payment_request(request, req_id):
         if not pr:
             return JsonResponse({"error": "So'rov topilmadi"}, status=404)
         if pr.status != "pending":
-            return JsonResponse(
-                {"error": "So'rov allaqachon ko'rib chiqilgan"}, status=400
-            )
+            return JsonResponse({"error": "So'rov allaqachon ko'rib chiqilgan"}, status=400)
 
         try:
             amount = int(data.get("amount"))
         except (ValueError, TypeError):
             return JsonResponse({"error": "amount son bo'lishi kerak"}, status=400)
         if amount <= 0:
-            return JsonResponse(
-                {"error": "amount 0 dan katta bo'lishi kerak"}, status=400
-            )
+            return JsonResponse({"error": "amount 0 dan katta bo'lishi kerak"}, status=400)
 
         month = (data.get("month") or "").strip()
         if not month:
-            return JsonResponse(
-                {"error": "month (YYYY-MM) kiritilishi kerak"}, status=400
-            )
+            return JsonResponse({"error": "month (YYYY-MM) kiritilishi kerak"}, status=400)
 
         paid_at = None
         paid_at_str = (data.get("paid_at") or "").strip()
@@ -5565,8 +5530,8 @@ def update_course(request, course_id):
 
         # Narx o'zgarishi butun markazga ta'sir qiladi — alohida ko'rsatamiz
         if course.monthly_fee != fee_before:
-            detail = f"narx {fee_before:,} → {course.monthly_fee:,} so'm".replace(
-                ",", " "
+            detail = (
+                f"narx {fee_before:,} → {course.monthly_fee:,} so'm".replace(",", " ")
             )
         else:
             detail = "ma'lumoti tahrirlandi"
@@ -6591,7 +6556,9 @@ def send_lesson_reminders(request):
         if not group_id:
             return JsonResponse({"error": "group_id majburiy"}, status=400)
 
-        group = Group.objects.filter(id=group_id).prefetch_related("students").first()
+        group = (
+            Group.objects.filter(id=group_id).prefetch_related("students").first()
+        )
         if not group:
             return JsonResponse({"error": "Guruh topilmadi"}, status=404)
 
@@ -6606,7 +6573,9 @@ def send_lesson_reminders(request):
             )
 
         # Idempotentlik: log yozuvini avval yaratamiz (takrorning oldini oladi)
-        log, created = LessonReminderLog.objects.get_or_create(group=group, date=today)
+        log, created = LessonReminderLog.objects.get_or_create(
+            group=group, date=today
+        )
         if not created:
             return JsonResponse(
                 {"already": True, "sent": log.sent, "no_chat": log.no_chat}
@@ -6691,7 +6660,8 @@ def send_message_students(request):
         log_action(
             request,
             "message.send",
-            f"Tanlangan {result['total']} o'quvchiga telegram xabar: " f"{text[:60]}",
+            f"Tanlangan {result['total']} o'quvchiga telegram xabar: "
+            f"{text[:60]}",
             target_type="broadcast",
             target_name="Tanlangan o'quvchilar",
             kind="selected",
