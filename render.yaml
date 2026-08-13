@@ -4,7 +4,20 @@ services:
     env: python
     plan: free
     region: oregon
-    buildCommand: pip install -r requirements.txt && python manage.py migrate && python manage.py ensure_super && python manage.py load_sheet_data && python manage.py set_webhook && python manage.py collectstatic --noinput
+    # ⚠️ `load_sheet_data` shu yerdan ataylab olib tashlandi. U har
+    # deployda ishga tushib, jadval ma'lumotini o'chirib qaytadan
+    # yaratardi — menejer panelda o'chirgan eski yozuvlar keyingi
+    # deployda yana paydo bo'lardi. Birinchi import baribir bo'ladi:
+    # server ko'tarilganda (config/wsgi.py) versiya belgisi
+    # tekshiriladi va faqat kerak bo'lsa import qilinadi.
+    # Ataylab qayta import: Render Shell'da
+    #   python manage.py load_sheet_data --force
+    # `purge_sheet_data --env-flag` odatda hech narsa qilmaydi. Faqat
+    # Environment'ga PURGE_SHEET_DATA=1 qo'shilganda jadvaldan import
+    # qilingan eski ma'lumotni o'chiradi (bepul rejada Shell yo'q,
+    # shuning uchun bir martalik tozalash shu yo'l bilan qilinadi).
+    # O'chirib bo'lgach o'zgaruvchini olib tashlang.
+    buildCommand: pip install -r requirements.txt && python manage.py migrate && python manage.py ensure_super && python manage.py clear_teacher_default_passwords && python manage.py purge_sheet_data --env-flag && python manage.py set_webhook && python manage.py collectstatic --noinput
     startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
     envVars:
       - key: SECRET_KEY
@@ -30,6 +43,10 @@ services:
       - key: SUPER_MANAGER_PHONE
         sync: false
       - key: SUPER_MANAGER_PASSWORD
+        sync: false
+      # Bir martalik tozalash uchun: qiymatni 1 qilib deploy qiling,
+      # keyin o'chiring. Yo'q bo'lsa hech narsa o'chirilmaydi.
+      - key: PURGE_SHEET_DATA
         sync: false
       # Build jarayonida `ensure_super` avtomatik ravishda
       # SUPER_MANAGER_PHONE bo'yicha supermenejer yarata oladi.

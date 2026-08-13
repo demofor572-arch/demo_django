@@ -87,5 +87,24 @@ class Command(BaseCommand):
                 if options["yes"] and count:
                     model.objects.all().delete()
 
+            # ⚠️ Yuqoridagi tsikl SheetImportMeta'ni ham o'chiradi. Belgi
+            # yo'q bo'lsa server keyingi ko'tarilishida "hali import
+            # qilinmagan" deb o'ylab butun jadvalni qaytadan yuklaydi —
+            # ya'ni hozir o'chirganimiz bir necha daqiqada qaytib keladi.
+            # Shu sabab belgini joriy versiyada tiklab qo'yamiz.
+            if options["yes"]:
+                from register_withvue.management.commands.load_sheet_data import (
+                    DATA_VERSION,
+                )
+                from register_withvue.models import SheetImportMeta
+
+                SheetImportMeta.objects.update_or_create(
+                    pk=1, defaults={"version": DATA_VERSION, "last_error": ""}
+                )
+                self.stdout.write(
+                    f"  SheetImportMeta — v{DATA_VERSION} belgisi tiklandi "
+                    "(qayta import bo'lmaydi)"
+                )
+
             if not options["yes"]:
                 transaction.set_rollback(True)

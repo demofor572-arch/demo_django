@@ -570,7 +570,6 @@ def manager_register(request):
 
 
 @csrf_exempt
-@csrf_exempt
 def manager_login(request):
     """Menejer login."""
     if request.method != "POST":
@@ -999,6 +998,12 @@ def create_teacher(request):
     """O'qituvchi yaratish."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
+    # ⚠️ Bu yerda avval hech qanday ruxsat tekshiruvi yo'q edi — istalgan
+    # kishi (hatto kirmagan) ustoz yarata olardi. update_teacher/
+    # delete_teacher kabi endi shu yerda ham tekshiriladi.
+    denied = _require_staff(request) or require_permission(request, "teachers.add")
+    if denied:
+        return denied
     try:
         data = json.loads(request.body)
         phone = data.get("phone", "").strip()
@@ -1017,10 +1022,18 @@ def create_teacher(request):
         if not name:
             return JsonResponse({"error": "Ism kiritilishi shart"}, status=400)
 
+        raw_password = (data.get("password") or "").strip()
         teacher = Teacher.objects.create(
             name=name,
             phone=phone,
-            password=make_password(ADMIN_PASSWORD),
+            # Parol berilmasa bo'sh qoldiriladi — login_student() bunday
+            # holatda ism-familiya bo'yicha kirishga ruxsat beradi (xuddi
+            # importdan kelgan o'quvchilar kabi), chunki "ustoz qo'shish"
+            # formasida parol maydoni yo'q va ustozga aytiladigan parol
+            # bo'lmasdi. Bu yerga ADMIN_PASSWORD yozish esa yaramaydi:
+            # u berilmasa parol umuman ishlamaydi, berilsa har bir ustoz
+            # admin parolini bilib oladi.
+            password=make_password(raw_password) if raw_password else "",
             is_senior=data.get("is_senior", False),
         )
         log_action(
@@ -2020,11 +2033,9 @@ def _name_password_matches(student, password):
     if not typed:
         return False
 
-    tokens = [
-        t
-        for t in (_fold_name(p) for p in f"{student.name} {student.surname}".split())
-        if t
-    ]
+    # Teacher modelida 'surname' maydoni yo'q — ism yolg'iz ham yetadi
+    full_name = f"{student.name} {getattr(student, 'surname', '')}".strip()
+    tokens = [t for t in (_fold_name(p) for p in full_name.split()) if t]
     if not tokens:
         return False
 
@@ -2036,6 +2047,20 @@ def _name_password_matches(student, password):
         forms.add("".join(variant))
         forms.add("".join(reversed(variant)))
     return typed in forms
+
+
+def _password_matches(obj, password):
+    """Yozuvning paroli mos keladimi — o'quvchi, ustoz va menejer uchun bir xil.
+
+    Parol o'rnatilgan bo'lsa faqat o'shanisi to'g'ri. O'rnatilmagan
+    bo'lsa (jadvaldan import qilingan o'quvchilar va menejer panelidan
+    qo'shilgan ustozlar) parol vazifasini ism-familiya bajaradi —
+    `_name_password_matches` bo'sh satrni qabul qilmaydi, ya'ni
+    parolsiz yozuv "har qanday parol to'g'ri" degani emas.
+    """
+    if getattr(obj, "password", ""):
+        return check_password(password, obj.password)
+    return _name_password_matches(obj, password)
 
 
 @csrf_exempt
@@ -2185,18 +2210,19 @@ def login_student(request):
         candidates = _find_students_by_any_phone(phone)
 
         if password is None:
-            return JsonResponse({"exists": bool(candidates)})
+            # Menejer panelidan qo'shilgan ustozning faqat `Teacher`
+            # yozuvi bo'ladi, `Student` yozuvi yo'q. Bu bosqichda faqat
+            # o'quvchilar qaralgani uchun u "topilmadi" bo'lib chiqardi
+            # va login formasida parol maydoni umuman ochilmasdi —
+            # ustoz "qo'shildim, lekin kira olmayapman" holatiga tushardi.
+            exists = bool(candidates) or bool(_find_teacher_by_any_phone(phone))
+            return JsonResponse({"exists": exists})
 
         # Bir xil raqamli bir nechta o'quvchi bo'lishi mumkin (aka-uka) —
         # parolga mos kelganini tanlaymiz
         student, password_ok = None, False
         for cand in candidates:
-            if cand.password and check_password(password, cand.password):
-                student, password_ok = cand, True
-                break
-            # Parol o'rnatilmagan (importdan kelgan) o'quvchilar uchun
-            # parol — ism va familiya
-            if not cand.password and _name_password_matches(cand, password):
+            if _password_matches(cand, password):
                 student, password_ok = cand, True
                 break
 
@@ -2231,7 +2257,7 @@ def login_student(request):
             )
 
         teacher = _find_teacher_by_any_phone(phone)
-        if teacher and teacher.password and check_password(password, teacher.password):
+        if teacher and _password_matches(teacher, password):
             if is_device_blocked(request, teacher.phone):
                 return JsonResponse(
                     {"error": "Bu qurilma bloklangan — menejerga murojaat qiling"},
@@ -2251,7 +2277,14 @@ def login_student(request):
                     "surname": "",
                     "phone": teacher.phone,
                     "teacher_id": teacher.id,
-                    "is_admin": False,
+                    # Loyihada "admin" — ustozlar paneli (frontend router
+                    # ham `is_admin` bo'yicha /admin ga kiritadi). Bu yerda
+                    # False qaytarilardi: ustoz paroli to'g'ri bo'lsa ham
+                    # o'quvchilar sahifasiga tushib qolardi va o'z paneliga
+                    # o'ta olmasdi. Jadvaldan kelgan ustozlarda buni
+                    # bog'langan Student(is_admin=True) profili hal qilardi,
+                    # menejer qo'shgan ustozda esa bunday profil yo'q.
+                    "is_admin": True,
                     "is_excellence": teacher.is_senior,
                     "role": "teacher",
                 }
@@ -6905,13 +6938,6 @@ def check_verification_code(request):
 # ─────────────────────────────
 
 MIN_PASSWORD_LEN = 6
-
-
-def _password_matches(obj, password):
-    """Yozuvning paroli mos keladimi (parol o'rnatilmagan bo'lsa ism-familiya)."""
-    if getattr(obj, "password", ""):
-        return check_password(password, obj.password)
-    return _name_password_matches(obj, password)
 
 
 @csrf_exempt

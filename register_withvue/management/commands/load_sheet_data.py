@@ -329,8 +329,34 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--file", default=str(DATA_FILE))
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Shu versiya allaqachon import qilingan bo'lsa ham qayta import qiladi",
+        )
 
     def handle(self, *args, **options):
+        # ⚠️ Versiya qorovuli. Bu buyruq har deployda (render.yaml
+        # buildCommand) va server ko'tarilganda chaqiriladi. Qorovulsiz
+        # u har safar `_clear_previous()` bilan jadval ma'lumotini
+        # o'chirib qaytadan yaratardi — menejer panelda o'chirgan eski
+        # o'quvchi/guruh/lead'lar keyingi deployda yana paydo bo'lardi
+        # ("o'chira olmayapman" muammosi). Bir marta import qilingandan
+        # keyin qayta import faqat ataylab bo'ladi: DATA_VERSION
+        # oshirilsa yoki --force berilsa.
+        from register_withvue.models import SheetImportMeta
+
+        meta = SheetImportMeta.objects.filter(pk=1).first()
+        if not options["force"] and meta and meta.version == DATA_VERSION:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"v{DATA_VERSION} allaqachon import qilingan "
+                    f"({meta.imported_at:%Y-%m-%d %H:%M}) — o'tkazib yuborildi. "
+                    "Qayta import uchun: --force"
+                )
+            )
+            return
+
         path = Path(options["file"])
         if not path.exists():
             raise CommandError(f"Fayl topilmadi: {path}")
@@ -467,7 +493,16 @@ class Command(BaseCommand):
         teacher = Teacher.objects.create(
             name=name,
             phone=self._uniq_teacher_phone(phone),
-            password=make_password(DEFAULT_TEACHER_PASSWORD),
+            # ADMIN_PASSWORD berilmagan bo'lsa parol bo'sh qoldiriladi.
+            # Avval shartsiz `make_password("")` yozilardi — bu bo'sh
+            # satrning haqiqiy hashi, ya'ni "parol o'rnatilgan" hisoblanadi
+            # va ustoz ism-familiyasi bilan ham, bo'sh parol bilan ham
+            # (frontend uni yubormaydi) kira olmasdi.
+            password=(
+                make_password(DEFAULT_TEACHER_PASSWORD)
+                if DEFAULT_TEACHER_PASSWORD
+                else ""
+            ),
             source=SOURCE,
         )
         # Admin profili o'quvchilar yaratilib bo'lgach ochiladi — shunda
@@ -571,7 +606,13 @@ class Command(BaseCommand):
                 surname=last[:100],
                 phone=stored,
                 phone2=(teacher.phone if stored != teacher.phone else "")[:50],
-                password=make_password(DEFAULT_TEACHER_PASSWORD),
+                # Ustozning Teacher yozuvidagi qoida bilan bir xil —
+                # parol yo'q bo'lsa ism-familiya bilan kiriladi
+                password=(
+                    make_password(DEFAULT_TEACHER_PASSWORD)
+                    if DEFAULT_TEACHER_PASSWORD
+                    else ""
+                ),
                 teacher=teacher,
                 is_admin=True,
                 source=SOURCE,

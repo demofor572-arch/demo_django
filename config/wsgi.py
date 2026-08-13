@@ -27,13 +27,21 @@ def _startup_tasks():
 
         call_command("migrate", interactive=False)
 
-        from register_withvue.models import Lead, SheetImportMeta
+        from register_withvue.models import SheetImportMeta
         from register_withvue.management.commands.load_sheet_data import (
             DATA_VERSION,
         )
 
+        # ⚠️ Bu yerda avval `not Lead.objects.exists()` sharti ham bor edi.
+        # U "hali import qilinmagan" degan ma'noda yozilgan, lekin amalda
+        # "menejer lead'larni o'chirib tashladi" holatini ham ushlab
+        # olardi: eski ma'lumot o'chirilgach, server keyingi marta
+        # ko'tarilishi bilan (Render'ning bepul rejasi harakatsizlikdan
+        # keyin uxlaydi va qaytadan uyg'onadi) hammasi qayta import
+        # qilinardi. Endi faqat import umuman bo'lmaganda yoki mapping
+        # versiyasi o'zgarganda ishlaydi.
         meta = SheetImportMeta.objects.filter(pk=1).first()
-        if not Lead.objects.exists() or not meta or meta.version != DATA_VERSION:
+        if not meta or meta.version != DATA_VERSION:
             call_command("load_sheet_data")
             SheetImportMeta.objects.filter(pk=1).update(last_error="")
     except Exception:
