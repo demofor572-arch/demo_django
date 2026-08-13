@@ -206,6 +206,55 @@ class PurgeByEnvFlagTests(TestCase):
         self.assertEqual(Lead.objects.count(), 1)
 
 
+class StartupPurgeSequenceTests(TestCase):
+    """config/wsgi.py: tozalash → import tekshiruvi ketma-ketligi.
+
+    Tozalash importdan OLDIN turadi. Agar tozalash import belgisini
+    o'chirib yuborsa, o'sha zahoti keyingi qadam "hali import
+    qilinmagan" deb hammasini qaytarib olib kelardi.
+    """
+
+    def setUp(self):
+        Student.objects.create(name="Import", surname="Qilingan", source="sheet")
+        Lead.objects.create(name="Import Lead", source="sheet")
+        self.manual = Student.objects.create(name="Qo'lda", surname="Kiritilgan")
+        SheetImportMeta.objects.create(pk=1, version=DATA_VERSION)
+
+    def _startup(self, purge_enabled):
+        """`_startup_tasks()` ichidagi mantiqning nusxasi."""
+        if purge_enabled:
+            call_command("purge_sheet_data", "--yes", stdout=StringIO())
+
+        meta = SheetImportMeta.objects.filter(pk=1).first()
+        reimported = not meta or meta.version != DATA_VERSION
+        return reimported
+
+    def test_the_purge_does_not_trigger_a_reimport(self):
+        reimported = self._startup(purge_enabled=True)
+
+        self.assertFalse(reimported, "tozalashdan keyin qayta import boshlandi")
+        self.assertEqual(Lead.objects.count(), 0)
+        self.assertEqual(Student.objects.count(), 1)
+        self.assertTrue(Student.objects.filter(id=self.manual.id).exists())
+
+    def test_a_restart_without_the_flag_changes_nothing(self):
+        """O'zgaruvchi olib tashlangach server qayta uyg'onsa — tinch."""
+        self._startup(purge_enabled=True)
+
+        reimported = self._startup(purge_enabled=False)
+
+        self.assertFalse(reimported)
+        self.assertEqual(Student.objects.count(), 1)
+
+    def test_purging_twice_is_harmless(self):
+        """O'zgaruvchi olib tashlanmasa har uyg'onishda takrorlanadi."""
+        self._startup(purge_enabled=True)
+        self._startup(purge_enabled=True)
+
+        self.assertEqual(Student.objects.count(), 1)
+        self.assertTrue(Student.objects.filter(id=self.manual.id).exists())
+
+
 class PurgeExceptManagerTests(TestCase):
     """Hammasini o'chirgan buyruq ham import belgisini tiklab qo'yishi kerak."""
 

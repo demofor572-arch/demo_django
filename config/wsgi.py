@@ -32,6 +32,27 @@ def _startup_tasks():
             DATA_VERSION,
         )
 
+        # Bir martalik tozalash — PURGE_SHEET_DATA muhit o'zgaruvchisi
+        # yoqilgan bo'lsagina ishlaydi.
+        #
+        # Nega build buyrug'ida emas, shu yerda: `render.yaml` faqat
+        # Blueprint bilan boshqariladigan servislarda o'qiladi. Servis
+        # Render dashboard'idan qo'lda yaratilgan bo'lsa, build buyrug'i
+        # dashboard'dagi qatordan olinadi va render.yaml'ga qo'shilgan
+        # buyruq umuman ishga tushmaydi. Server ko'tarilishi esa har
+        # ikkala holatda ham bo'ladi.
+        #
+        # ⚠️ Tozalangach o'zgaruvchini Render'dan olib tashlang: aks holda
+        # har uyg'onishda takrorlanadi (import qilingan yozuv qolmagach
+        # zarari yo'q, lekin keyin ataylab import qilsangiz darrov o'chadi).
+        if os.environ.get("PURGE_SHEET_DATA", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            logging.warning("PURGE_SHEET_DATA yoqilgan — import ma'lumoti o'chirilmoqda")
+            call_command("purge_sheet_data", "--yes")
+
         # ⚠️ Bu yerda avval `not Lead.objects.exists()` sharti ham bor edi.
         # U "hali import qilinmagan" degan ma'noda yozilgan, lekin amalda
         # "menejer lead'larni o'chirib tashladi" holatini ham ushlab
