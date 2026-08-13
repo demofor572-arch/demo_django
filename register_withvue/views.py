@@ -62,6 +62,24 @@ from .access import (
 ADMIN_PASSWORD = settings.ADMIN_PASSWORD
 EXCELLENCE_PASSWORD = settings.EXCELLENCE_PASSWORD
 
+
+def _role_password_ok(supplied, secret):
+    """Rol paroli mos keldimi — bo'sh sir hech qachon rol bermaydi.
+
+    ⚠️ Avval oddiy `supplied == secret` yozilgan edi. ADMIN_PASSWORD yoki
+    EXCELLENCE_PASSWORD muhit o'zgaruvchisi berilmasa ular bo'sh satr
+    bo'ladi; ro'yxatdan o'tuvchi maydonni umuman yubormasa uning qiymati
+    ham bo'sh satr — ya'ni `"" == ""` va istalgan begona odam o'zini
+    admin (ustozlar paneli) yoki menejer qilib ro'yxatdan o'tkaza olardi.
+    Endi sir sozlanmagan bo'lsa bu yo'l butunlay yopiq.
+
+    Taqqoslash `compare_digest` bilan — parolni belgima-belgi taxmin
+    qilishga urinishda javob vaqti farq qilmaydi.
+    """
+    if not secret:
+        return False
+    return secrets.compare_digest(str(supplied or ""), str(secret))
+
 ODD_DAYS = {0, 2, 4}
 EVEN_DAYS = {1, 3, 5}
 
@@ -2349,8 +2367,8 @@ def register_student(request):
         admin_password = data.get("admin_password", "")
         excellence_password = data.get("excellence_password", "")
 
-        is_admin = admin_password == ADMIN_PASSWORD
-        is_excellence = excellence_password == EXCELLENCE_PASSWORD
+        is_admin = _role_password_ok(admin_password, ADMIN_PASSWORD)
+        is_excellence = _role_password_ok(excellence_password, EXCELLENCE_PASSWORD)
 
         teacher = None
         if not is_admin and not is_excellence:

@@ -1,7 +1,14 @@
 from pathlib import Path
 import os
+import sys
 import dj_database_url
 from dotenv import load_dotenv
+
+# Test ishga tushirilyaptimi. Django test runner DEBUG ni majburan
+# False qiladi, shuning uchun "ishlab turgan server" sozlamalari
+# testlarda ham yoqilib ketadi — ba'zilari test mijoziga to'g'ri
+# kelmaydi (masalan https ga yo'naltirish).
+TESTING = "test" in sys.argv or "pytest" in sys.modules
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -10,10 +17,26 @@ load_dotenv(BASE_DIR / ".env")
 
 
 # SECURITY
-SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-change-this-key")
+_INSECURE_KEY = "django-insecure-change-this-key"
+SECRET_KEY = os.environ.get("SECRET_KEY", _INSECURE_KEY)
 
 # Read DEBUG from environment for deploy flexibility
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("1", "true", "yes")
+
+# SECRET_KEY sozlanmagan bo'lsa hamma kodda yozilgan standart kalitni
+# ishlatadi — u ochiq repoda turgani uchun begona odam imzolangan
+# qiymatlarni (sessiya, CSRF) o'zi yasay oladi. Telegram webhook siri
+# ham shu kalitdan hosil qilinadi, ya'ni u ham taxmin qilinadigan
+# bo'lib qoladi. Bu yerda xato ko'tarilmaydi (sayt to'xtab qolmasin),
+# lekin Render loglarida ko'rinib turadi.
+if not DEBUG and SECRET_KEY == _INSECURE_KEY:
+    import logging as _logging
+
+    _logging.getLogger(__name__).error(
+        "XAVFSIZLIK: SECRET_KEY muhit o'zgaruvchisi sozlanmagan — "
+        "kodga yozilgan standart kalit ishlatilyapti. Render'da "
+        "SECRET_KEY ni o'rnating."
+    )
 
 # Allow hosts configurable via env var; keep render domain by default
 ALLOWED_HOSTS = os.environ.get(
@@ -107,6 +130,42 @@ else:
 # When behind a proxy (Render), honor X-Forwarded-Proto for secure URLs
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# ─────────────────────────────
+# XAVFSIZLIK SARLAVHALARI
+# Faqat ishlab turgan serverda — lokalda https bo'lmagani uchun
+# yoqilsa brauzer sahifani umuman ocha olmaydi.
+# ─────────────────────────────
+if not DEBUG:
+    # Cookie'lar faqat https orqali yuborilsin. Bu loyihada kirish
+    # cookie'ga tayanmaydi (sarlavha + localStorage), shuning uchun
+    # ta'sir kichik — lekin admin paneli sessiyasi shular bilan yuradi.
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
+    # http bilan kelgan so'rov https ga yo'naltiriladi. Render TLS ni
+    # o'zi tugatib X-Forwarded-Proto yuboradi, yuqoridagi
+    # SECURE_PROXY_SSL_HEADER shuni o'qiydi — shuning uchun cheksiz
+    # yo'naltirish halqasi bo'lmaydi. Kutilmagan holat chiqsa
+    # SECURE_SSL_REDIRECT=0 bilan o'chirib turish mumkin.
+    #
+    # Testlarda o'chiriladi: Django test mijozi http bilan yuradi va
+    # DEBUG ni False qilib qo'yadi — yoqiq qolsa har bir so'rov 301
+    # bo'lib, javob JSON o'rniga yo'naltirish sahifasi bo'lib qolardi.
+    SECURE_SSL_REDIRECT = (not TESTING) and os.environ.get(
+        "SECURE_SSL_REDIRECT", "True"
+    ).lower() in ("1", "true", "yes")
+
+    # Brauzer shu domenga faqat https bilan borsin. Muddat ataylab
+    # qisqa (1 kun) va subdomenlarga tarqalmaydi: HSTS ni orqaga
+    # qaytarish qiyin, shuning uchun avval qisqa muddat bilan
+    # ishonch hosil qilinadi, keyin oshiriladi.
+    SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "86400"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+
+    # Brauzer javobdagi Content-Type ni o'zi "taxmin qilib" o'zgartirmasin
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+
 # PASSWORD VALIDATION
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -154,13 +213,25 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:8080",
     "https://demo-bay-eta-38.vercel.app",
 ]
+if FRONTEND_BASE_URL and FRONTEND_BASE_URL not in CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS.append(FRONTEND_BASE_URL)
 
 # Vercel uchun umumiy subdomain moslama. Agar frontend boshqa Vercel
 # loyihaga o'tsa, bu ham ishlaydi.
 CORS_ALLOWED_ORIGIN_REGEXES = [r"^https://.*\.vercel\.app$"]
 
-# test uchun va frontend URL'larini brauzerda sinov qilish uchun
-CORS_ALLOW_ALL_ORIGINS = True
+# ⚠️ Avval bu yerda shartsiz `CORS_ALLOW_ALL_ORIGINS = True` turardi
+# ("test uchun" deb). Amalda bu istalgan begona saytga API javobini
+# brauzerda o'qish imkonini berardi: foydalanuvchi shunday saytga
+# kirsa, u o'quvchilar ro'yxati, telefon raqamlari va to'lovlarni
+# to'liq o'qib olishi mumkin edi. Chaqiruvchi 'X-User-Phone' sarlavhasi
+# bilan aniqlanadi va uni soxtalashtirish oson bo'lgani uchun bu
+# ayniqsa xavfli.
+#
+# Endi faqat lokal ishlab chiqishda ochiq. Ishlab turgan serverda
+# yuqoridagi ro'yxat va vercel.app shabloni yetarli — frontend
+# o'shalardan biriga tushadi.
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 
 # Menejer paneli destruktiv amallarda 'X-User-Phone' sarlavhasini,
 # har bir so'rovda esa 'X-Device-Id' ni yuboradi (supermenejer qaysi
