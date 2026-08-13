@@ -1423,12 +1423,103 @@ def _real_students():
     return Student.objects.filter(is_admin=False, is_excellence=False)
 
 
+def _range_months(request):
+    """`?from=&to=` sana oralig'i va u tegib o'tgan oylar.
+
+    Oralik berilmasa joriy oy olinadi. To'lovlar oy bo'yicha saqlanadi
+    (`Payment.month` = "YYYY-MM"), shuning uchun kun oralig'i tegib
+    o'tgan har bir oy to'liq hisobga olinadi — menejer 10-20 avgustni
+    tanlasa ham avgust oyining to'lovlari ko'rinadi.
+
+    Qaytadi: (start, end, months) — months "YYYY-MM" ro'yxati.
+    """
+    today = tashkent_today()
+
+    def parse(value, fallback):
+        try:
+            return datetime.strptime((value or "").strip(), "%Y-%m-%d").date()
+        except ValueError:
+            return fallback
+
+    start = parse(request.GET.get("from"), today.replace(day=1))
+    end = parse(request.GET.get("to"), today)
+    if end < start:
+        start, end = end, start
+
+    months, y, m = [], start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        months.append(f"{y:04d}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return start, end, months
+
+
+def _range_payload(start, end, months):
+    return {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "months": months,
+    }
+
+
+def _range_payment_rows(months, teacher_id=None):
+    """Oralikdagi to'lovlar — sodda dict qatorlari.
+
+    `values()` ishlatiladi: har bir to'lov uchun o'quvchi/ustoz obyektini
+    yuklash shart emas, faqat id va summalar kerak.
+    """
+    qs = Payment.objects.filter(
+        month__in=months,
+        student__is_admin=False,
+        student__is_excellence=False,
+        student__teacher__isnull=False,
+    )
+    if teacher_id is not None:
+        qs = qs.filter(student__teacher_id=teacher_id)
+    return qs.values(
+        "student_id",
+        "student__teacher_id",
+        "month",
+        "amount_due",
+        "discount",
+        "paid_amount",
+        "is_paid",
+    )
+
+
+def _net_due(row):
+    """Chegirmadan keyingi sof summa — `payment_net_due()` bilan bir xil."""
+    return max(0, int(row["amount_due"] or 0) - int(row["discount"] or 0))
+
+
+def _sum_rows(rows):
+    """Bir to'plam to'lov qatori bo'yicha kutilgan/yig'ilgan/qolgan."""
+    expected = collected = 0
+    paid_ids = set()
+    for r in rows:
+        expected += _net_due(r)
+        got = int(r["paid_amount"] or 0)
+        collected += got
+        if got > 0 or r["is_paid"]:
+            paid_ids.add(r["student_id"])
+    return {
+        "expected": expected,
+        "collected": collected,
+        "remaining": max(0, expected - collected),
+        "paid_student_ids": paid_ids,
+    }
+
+
 def get_teachers_overview(request):
     """Menejer uchun ustozlar sahifasi — har biri bo'yicha statistika.
 
     Login qila oladimi (`can_login`) ham qaytariladi: import paytida
     telefoni to'liq kelmagan ustozlarga shartli kod berilgan, ular
     raqami kiritilmaguncha tizimga kira olmaydi.
+
+    `?format=full` — davr bo'yicha to'lov ko'rsatkichlari va jami bilan
+    birga `{teachers, totals, range}` qaytadi. Bunday so'ralmasa javob
+    eski holicha oddiy massiv bo'lib qoladi (eski ko'rinishlar shunga
+    tayanadi).
     """
     try:
         counts = dict(
@@ -1442,9 +1533,18 @@ def get_teachers_overview(request):
             .values_list("teacher_id")
             .annotate(n=db_models.Count("id"))
         )
+
+        start, end, months = _range_months(request)
+        per_teacher = {}
+        for row in _range_payment_rows(months):
+            per_teacher.setdefault(row["student__teacher_id"], []).append(row)
+
         data = []
         for t in Teacher.objects.order_by("name"):
             key = _phone_key(t.phone)
+            stats = _sum_rows(per_teacher.get(t.id, []))
+            students_count = counts.get(t.id, 0)
+            paid_students = len(stats["paid_student_ids"])
             data.append(
                 {
                     "id": t.id,
@@ -1452,8 +1552,18 @@ def get_teachers_overview(request):
                     "phone": t.phone,
                     "is_senior": t.is_senior,
                     "penalty_limit": t.penalty_limit,
-                    "students_count": counts.get(t.id, 0),
+                    "students_count": students_count,
                     "groups_count": groups.get(t.id, 0),
+                    "expected": stats["expected"],
+                    "collected": stats["collected"],
+                    "remaining": stats["remaining"],
+                    "collected_percent": (
+                        round(stats["collected"] * 100 / stats["expected"])
+                        if stats["expected"]
+                        else 0
+                    ),
+                    "paid_students": paid_students,
+                    "unpaid_students": max(0, students_count - paid_students),
                     "can_login": len(key) >= MIN_PHONE_KEY_LEN,
                     # O'zbek raqami 9 xonali — undan qisqasi jadvaldan
                     # chala kelgan, menejer to'g'rilashi kerak
@@ -1469,7 +1579,134 @@ def get_teachers_overview(request):
                     ),
                 }
             )
-        return JsonResponse(data, safe=False)
+
+        # Eski ko'rinishlar massiv kutadi — standart javob o'zgarmaydi
+        if request.GET.get("format") != "full":
+            return JsonResponse(data, safe=False)
+
+        overall = _sum_rows([r for rows in per_teacher.values() for r in rows])
+        return JsonResponse(
+            {
+                "teachers": data,
+                "range": _range_payload(start, end, months),
+                "totals": {
+                    "students": _real_students().count(),
+                    "paid_students": len(overall["paid_student_ids"]),
+                    "collected": overall["collected"],
+                    "expected": overall["expected"],
+                    "remaining": overall["remaining"],
+                },
+            }
+        )
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def get_teacher_history(request, teacher_id):
+    """Bitta ustozning davr bo'yicha to'lov tarixi.
+
+    Uch bo'lim: oylar kesimi, o'quvchilari va oralikda kassaga tushgan
+    pul harakati. `received_in_range` — kassa jurnali bo'yicha, ya'ni
+    "shu kunlarda qancha tushdi"; `collected` esa oy bo'yicha, ya'ni
+    "shu oylarning to'lovidan qancha yig'ildi". Ikkalasi turli savolga
+    javob beradi, shuning uchun ikkalasi ham qaytariladi.
+    """
+    teacher = Teacher.objects.filter(id=teacher_id).first()
+    if not teacher:
+        return JsonResponse({"error": "Ustoz topilmadi"}, status=404)
+
+    try:
+        start, end, months = _range_months(request)
+        rows = list(_range_payment_rows(months, teacher_id=teacher.id))
+        totals = _sum_rows(rows)
+
+        by_month = {}
+        for r in rows:
+            by_month.setdefault(r["month"], []).append(r)
+        month_rows = []
+        for month in months:
+            m_rows = by_month.get(month, [])
+            m = _sum_rows(m_rows)
+            month_rows.append(
+                {
+                    "month": month,
+                    "students": len({r["student_id"] for r in m_rows}),
+                    "paid_students": len(m["paid_student_ids"]),
+                    "collected": m["collected"],
+                    "expected": m["expected"],
+                    "remaining": m["remaining"],
+                }
+            )
+
+        by_student = {}
+        for r in rows:
+            by_student.setdefault(r["student_id"], []).append(r)
+
+        students = []
+        student_qs = (
+            _real_students()
+            .filter(teacher_id=teacher.id)
+            # O'quvchi-guruh bog'lanishi M2M (`Group.students`) — o'quvchida
+            # `group` maydoni yo'q, shuning uchun prefetch bilan olinadi
+            .prefetch_related("groups")
+            .order_by("name", "surname")
+        )
+        for s in student_qs:
+            st = _sum_rows(by_student.get(s.id, []))
+            group = s.groups.first()
+            students.append(
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "surname": s.surname,
+                    # Bu loyihada Student.status maydoni yo'q — bitirmagan
+                    # har bir o'quvchi faol hisoblanadi
+                    "status": "active",
+                    "status_label": "Faol",
+                    "group_name": group.name if group else "",
+                    "collected": st["collected"],
+                    "remaining": st["remaining"],
+                    "has_paid": bool(st["paid_student_ids"]),
+                }
+            )
+
+        # Kassa jurnali o'quvchi nomi va oyni o'zida saqlaydi — to'lov
+        # o'chirilgan bo'lsa ham qator o'qiladi
+        entries = [
+            {
+                "id": e.id,
+                "student_name": e.student_name,
+                "month": e.month,
+                "amount": e.amount,
+                "kind": e.kind,
+                "created_at": e.created_at.isoformat() if e.created_at else "",
+            }
+            for e in CashEntry.objects.filter(
+                student__teacher_id=teacher.id,
+                created_at__date__gte=start,
+                created_at__date__lte=end,
+            ).order_by("-created_at")[:200]
+        ]
+
+        return JsonResponse(
+            {
+                "teacher": {"id": teacher.id, "name": teacher.name},
+                "range": _range_payload(start, end, months),
+                "months": month_rows,
+                "students": students,
+                "entries": entries,
+                "totals": {
+                    "students": len(students),
+                    # Status maydoni yo'q — hammasi faol
+                    "active_students": len(students),
+                    "paid_students": len(totals["paid_student_ids"]),
+                    "collected": totals["collected"],
+                    "expected": totals["expected"],
+                    "remaining": totals["remaining"],
+                    "received_in_range": sum(e["amount"] for e in entries),
+                },
+            }
+        )
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 

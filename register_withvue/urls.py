@@ -93,6 +93,7 @@ urlpatterns = [
         "teachers/<int:teacher_id>/penalty-limit/", views.update_teacher_penalty_limit
     ),
     path("teachers/reassign/", views.reassign_students),
+    path("teachers/<int:teacher_id>/history/", views.get_teacher_history),
     # ───────────────────────────────
     # MENEJER PANELI
     # ───────────────────────────────
