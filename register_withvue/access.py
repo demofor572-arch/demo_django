@@ -1,21 +1,27 @@
-"""Menejer vakolatlari, supermenejer tekshiruvi va qurilma hisobi.
+"""Kirish tokeni, menejer vakolatlari, supermenejer tekshiruvi va qurilma hisobi.
 
-Loyihada sessiya/token autentifikatsiyasi yo'q — chaqiruvchi
-'X-User-Phone' sarlavhasi orqali aniqlanadi (views.py'dagi
-`_require_staff` bilan bir xil yondashuv). Qurilma esa brauzerda bir
-marta yaratilib localStorage'da saqlanadigan 'X-Device-Id' bilan.
+Chaqiruvchi 'Authorization: Bearer <token>' orqali aniqlanadi. Token
+login paytida beriladi va bazada faqat uning sha256 xeshi saqlanadi,
+ya'ni uni parolni bilmasdan olish mumkin emas. Qurilma esa brauzerda
+bir marta yaratilib localStorage'da saqlanadigan 'X-Device-Id' bilan
+belgilanadi — supermenejer qurilmani bloklasa, uning tokeni ham darrov
+kuchini yo'qotadi.
 
-⚠️ Bu sarlavhalarni soxtalashtirish mumkin. Maqsad — vakolatlarni
-ajratish va supermenejerga kirishlarni ko'rsatish, kriptografik himoya
-emas. Haqiqiy himoya uchun token/sessiya alohida qo'shilishi kerak.
+⚠️ KO'CHISH DAVRI: token yuborilmagan so'rovlarda hali ham eski
+'X-User-Phone' sarlavhasi o'qiladi va uni istalgan odam
+soxtalashtira oladi. Bu frontend token yuboradigan bo'lgunicha va
+hamma qayta kirgunicha vaqtincha qoldirilgan — keyin `caller_phone`
+dagi o'sha tarmoq olib tashlanadi.
 """
 
+import hashlib
 import re
+import secrets
 
 from django.http import JsonResponse
 from django.utils import timezone
 
-from .models import ActivityLog, LoginDevice, Manager
+from .models import ActivityLog, AuthToken, LoginDevice, Manager
 
 MIN_PHONE_KEY_LEN = 7
 
@@ -146,11 +152,119 @@ def clean_permissions(value):
 
 
 # ─────────────────────────────────────────
+# KIRISH TOKENI
+# ─────────────────────────────────────────
+
+
+def _hash_token(raw):
+    """Tokenning bazada saqlanadigan ko'rinishi."""
+    return hashlib.sha256(str(raw or "").encode()).hexdigest()
+
+
+def issue_token(request, *, role, phone, student=None, teacher=None, manager=None):
+    """Yangi kirish tokeni yaratadi va xom qiymatini qaytaradi.
+
+    Xom token faqat shu yerda — bir marta — ko'rinadi; bazada uning
+    xeshi saqlanadi. Chaqiruvchi uni login javobida foydalanuvchiga
+    yuboradi va boshqa hech qachon o'qib bo'lmaydi.
+    """
+    raw = secrets.token_urlsafe(32)
+    did = device_id(request)
+    device = None
+    if did and phone:
+        device = LoginDevice.objects.filter(device_id=did, phone=phone).first()
+
+    AuthToken.objects.create(
+        key_hash=_hash_token(raw),
+        role=role,
+        student=student,
+        teacher=teacher,
+        manager=manager,
+        phone=phone or "",
+        device=device,
+        device_key=did,
+    )
+    return raw
+
+
+def bearer_token(request):
+    """So'rovdagi xom token — 'Authorization: Bearer <token>'."""
+    header = (request.headers.get("Authorization") or "").strip()
+    if not header.lower().startswith("bearer "):
+        return ""
+    return header[7:].strip()
+
+
+def caller_token(request):
+    """So'rovdagi tokenga mos AuthToken — yaroqsiz bo'lsa None.
+
+    Yaroqsiz deganda: topilmadi, bekor qilingan, muddati o'tgan yoki
+    qurilmasi bloklangan. Oxirgisi muhim — token muddatsiz bo'lgani
+    uchun qurilmani bloklash uni to'xtatadigan yagona yo'l.
+    """
+    raw = bearer_token(request)
+    if not raw:
+        return None
+
+    token = (
+        AuthToken.objects.select_related("device")
+        .filter(key_hash=_hash_token(raw))
+        .first()
+    )
+    if not token or not token.is_active:
+        return None
+
+    # Oxirgi ishlatilgan vaqt — supermenejer qaysi token tirikligini
+    # ko'rishi uchun. save() emas, update(): har so'rovda to'liq
+    # yozuvni qayta yozish shart emas.
+    AuthToken.objects.filter(pk=token.pk).update(last_used_at=timezone.now())
+    return token
+
+
+def revoke_token(request):
+    """Shu so'rovdagi tokenni bekor qiladi (chiqish)."""
+    raw = bearer_token(request)
+    if not raw:
+        return 0
+    return AuthToken.objects.filter(
+        key_hash=_hash_token(raw), revoked_at__isnull=True
+    ).update(revoked_at=timezone.now())
+
+
+def revoke_tokens_for_device(device_id_value, phone=""):
+    """Qurilma bloklanganda uning tokenlarini bekor qiladi."""
+    qs = AuthToken.objects.filter(
+        device_key=device_id_value, revoked_at__isnull=True
+    )
+    if phone:
+        qs = qs.filter(phone=phone)
+    return qs.update(revoked_at=timezone.now())
+
+
+# ─────────────────────────────────────────
 # TEKSHIRUVLAR
 # ─────────────────────────────────────────
 
 
 def caller_phone(request):
+    """Chaqiruvchining telefoni — avval tokendan, keyin eski sarlavhadan.
+
+    Token bo'lsa u hal qiladi: telefon tasdiqlangan bo'ladi, chunki
+    tokenni faqat parolni bilgan odam login orqali oladi. Token
+    yuborilgan-u yaroqsiz bo'lsa — kimlik yo'q. Bunday holatda eski
+    sarlavhaga qaytish xavfli bo'lardi: bekor qilingan tokenli odam
+    sarlavhani qo'lda yozib ishini davom ettirardi.
+
+    ⚠️ Token umuman yuborilmagan bo'lsa hali ham 'X-User-Phone'
+    o'qiladi — uni istalgan odam soxtalashtira oladi. Bu ko'chish
+    davri uchun: frontend token yuboradigan bo'lgach va hamma qayta
+    kirgach, shu tarmoq olib tashlanadi.
+    """
+    token = caller_token(request)
+    if token:
+        return token.phone
+    if bearer_token(request):
+        return ""
     return (request.headers.get("X-User-Phone") or "").strip()
 
 

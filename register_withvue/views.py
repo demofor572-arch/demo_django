@@ -49,12 +49,15 @@ from .serializers import NewsSerializer
 from .access import (
     DEFAULT_PERMISSIONS,
     caller_manager,
+    caller_phone,
     is_device_blocked,
+    issue_token,
     log_action,
     log_attendance,
     record_login,
     require_permission,
     require_super,
+    revoke_token,
     touch_presence,
 )
 
@@ -636,6 +639,11 @@ def manager_login(request):
 
         return JsonResponse(
             {
+                # Kirish tokeni — bundan keyin har so'rovda
+                # 'Authorization: Bearer <token>' bilan yuboriladi
+                "token": issue_token(
+                    request, role="manager", phone=manager.phone, manager=manager
+                ),
                 "id": manager.id,
                 "name": manager.name,
                 "surname": manager.surname,
@@ -1386,7 +1394,7 @@ def _require_staff(request):
 
     Mos kelsa None, aks holda tayyor 403 javobini qaytaradi.
     """
-    phone = (request.headers.get("X-User-Phone") or "").strip()
+    phone = caller_phone(request)
     if phone and (
         _find_manager_by_any_phone(phone) or _find_teacher_by_any_phone(phone)
     ):
@@ -1411,7 +1419,7 @@ def _caller_own_teacher(request):
     None qaytaradi — ular hamma guruhni ko'raveradi. Sarlavha
     bo'lmasa ham None: eski mijozlar ishlashda davom etadi.
     """
-    phone = (request.headers.get("X-User-Phone") or "").strip()
+    phone = caller_phone(request)
     if not phone:
         return None
     if _find_manager_by_any_phone(phone):
@@ -2228,7 +2236,7 @@ def _require_manager_or_admin(request):
     soxtalashtirish mumkin. Maqsadi: begona yoki oddiy ustoz tasodifan
     o'chirib yubormasin. Mos kelsa None, aks holda 403 javob.
     """
-    phone = (request.headers.get("X-User-Phone") or "").strip()
+    phone = caller_phone(request)
     if phone and (
         _find_manager_by_any_phone(phone) or _find_admin_student_by_phone(phone)
     ):
@@ -2448,6 +2456,19 @@ def register_student(request):
 
 
 @csrf_exempt
+def logout_view(request):
+    """Chiqish — shu qurilmadagi kirish tokenini bekor qiladi.
+
+    Token muddatsiz bo'lgani uchun bu muhim: "chiqdim" bosilgach
+    localStorage tozalanadi, lekin token bazada tirik qolsa uni
+    nusxalab olgan odam ishlatishda davom eta olardi.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    return JsonResponse({"revoked": revoke_token(request)})
+
+
+@csrf_exempt
 def login_student(request):
     """O'quvchi va o'qituvchi login."""
     if request.method != "POST":
@@ -2497,6 +2518,13 @@ def login_student(request):
             return JsonResponse(
                 {
                     "exists": True,
+                    "token": issue_token(
+                        request,
+                        role="teacher" if student.is_admin or student.is_excellence
+                        else "student",
+                        phone=student.phone,
+                        student=student,
+                    ),
                     "id": student.id,
                     "name": student.name,
                     "surname": student.surname,
@@ -2527,6 +2555,9 @@ def login_student(request):
             return JsonResponse(
                 {
                     "exists": True,
+                    "token": issue_token(
+                        request, role="teacher", phone=teacher.phone, teacher=teacher
+                    ),
                     "id": teacher.id,
                     "name": teacher.name,
                     "surname": "",

@@ -1564,3 +1564,102 @@ class CashEntry(models.Model):
 
     def __str__(self):
         return f"{self.student_name or '—'} — {self.amount:+} ({self.month})"
+
+
+# ─────────────────────────────────────────
+# KIRISH TOKENI
+# ─────────────────────────────────────────
+
+
+class AuthToken(models.Model):
+    """Muvaffaqiyatli logindan keyin beriladigan kirish tokeni.
+
+    Loyihada ilgari haqiqiy autentifikatsiya yo'q edi: chaqiruvchi
+    'X-User-Phone' sarlavhasi bilan aniqlanardi va uni istalgan odam
+    qo'lda yozib qo'ya olardi. Token o'sha teshikni yopadi — uni faqat
+    parolni bilgan odam login orqali oladi.
+
+    Tokenning o'zi bazada saqlanmaydi, faqat sha256 xeshi. Baza nusxasi
+    sizib chiqsa ham undan ishlaydigan token tiklab bo'lmaydi.
+
+    Muddat yo'q (egasi shunday tanlagan): token faqat "chiqish"
+    bosilganda yoki supermenejer qurilmani bloklaganda kuchini
+    yo'qotadi. `expires_at` maydoni keyinchalik muddat joriy qilish
+    kerak bo'lsa tayyor turibdi — bo'sh bo'lsa muddat tekshirilmaydi.
+    """
+
+    ROLE_CHOICES = [
+        ("student", "O'quvchi"),
+        ("teacher", "Ustoz"),
+        ("manager", "Menejer"),
+    ]
+
+    key_hash = models.CharField(
+        max_length=64, unique=True, db_index=True, verbose_name="Token xeshi"
+    )
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+
+    # Uchtadan bittasi to'ladi — kim ekanini shu ko'rsatadi
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="auth_tokens",
+    )
+    teacher = models.ForeignKey(
+        Teacher,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="auth_tokens",
+    )
+    manager = models.ForeignKey(
+        Manager,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="auth_tokens",
+    )
+
+    # Mavjud tekshiruvlar telefon bo'yicha ishlaydi (_require_staff,
+    # caller_manager va h.k.) — token o'sha telefonni tasdiqlangan
+    # holda beradi, shuning uchun ular o'zgarishsiz ishlayveradi
+    phone = models.CharField(max_length=20, db_index=True)
+
+    # Qurilma bloklansa shu token ham darrov kuchini yo'qotadi
+    device = models.ForeignKey(
+        "LoginDevice",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="auth_tokens",
+    )
+    # Brauzer yaratgan qurilma ID. `device` FK bilan bir xil emas:
+    # LoginDevice yozuvi ochilmagan bo'lishi mumkin (record_login
+    # qurilma ID bo'lmasa hech narsa yozmaydi), lekin xom qiymat
+    # baribir kerak — blok tekshiruvi shu bo'yicha ketadi.
+    device_key = models.CharField(max_length=64, blank=True, db_index=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Kirish tokeni"
+        verbose_name_plural = "Kirish tokenlari"
+
+    def __str__(self):
+        return f"{self.role}: {self.phone}"
+
+    @property
+    def is_active(self):
+        if self.revoked_at:
+            return False
+        if self.expires_at and self.expires_at <= timezone.now():
+            return False
+        if self.device and self.device.is_blocked:
+            return False
+        return True

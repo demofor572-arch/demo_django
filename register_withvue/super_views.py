@@ -26,6 +26,7 @@ from .access import (
     permission_catalog,
     phone_key,
     require_super,
+    revoke_tokens_for_device,
 )
 from .models import (
     ActivityLog,
@@ -298,6 +299,14 @@ def set_device_blocked(request, device_pk):
     device.is_blocked = blocked
     device.blocked_at = timezone.now() if blocked else None
     device.save(update_fields=["is_blocked", "blocked_at"])
+
+    # Kirish tokenlari muddatsiz — bloklash ularni to'xtatadigan yagona
+    # yo'l. `AuthToken.is_active` qurilma bog'lanishini o'zi tekshiradi,
+    # lekin bog'lanish bo'sh qolgan tokenlar ham bor (LoginDevice yozuvi
+    # keyinroq ochilgan bo'lsa) — shuning uchun qurilma ID bo'yicha ham
+    # bekor qilamiz.
+    if blocked:
+        revoke_tokens_for_device(device.device_id, phone=device.phone)
     log_action(
         request,
         "device.block",

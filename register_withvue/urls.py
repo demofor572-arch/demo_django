@@ -116,6 +116,7 @@ urlpatterns = [
     path("ping/", views.ping),
     path("register/", views.register_student),
     path("login/", views.login_student),
+    path("logout/", views.logout_view),
     # ───────────────────────────────
     # LESSONS
     # ───────────────────────────────
